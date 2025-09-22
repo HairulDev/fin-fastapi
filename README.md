@@ -39,11 +39,18 @@ FMP_API_KEY=your_api_key (go to https://financialmodelingprep.com)
 
 ```bash
 # Active virtual environment
-python3 -m venv env
+python3.12 -m venv env
 source env/bin/activate
+```
+
+
+```bash
+# Training
+train/train_lstm.py
 ```
 
 ```bash
 # Start the development server.
 uvicorn main:app --host 127.0.0.1 --port 9000 --reload
 ```
+
