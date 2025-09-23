@@ -39,14 +39,14 @@ FMP_API_KEY=your_api_key (go to https://financialmodelingprep.com)
 
 ```bash
 # Active virtual environment
-python3.12 -m venv env
-source env/bin/activate
+python3 -m venv ~/env311
+source ~/env311/bin/activate
 ```
 
 
 ```bash
 # Training
-train/train_lstm.py
+python train/train_lstm.py
 ```
 
 ```bash

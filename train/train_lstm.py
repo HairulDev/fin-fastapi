@@ -5,14 +5,16 @@ import torch, numpy as np, joblib
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MinMaxScaler
 from models.model_lstm import StockLSTM
-from utils.utils import fetch_price
+from utils.utils import fetch_price  # <-- sudah ada di utils
 
-symbols = ["AAPL", "MSFT", "TSLA"]
+symbols = ["AAPL", "MSFT", "GOOGL"]
 
 seq_len = 30
 
 for symbol in symbols:
     print(f"\n=== Training {symbol} ===")
+    
+    # ambil data gabungan API + JSON lokal
     df = fetch_price(symbol)
     prices = df['close'].values[::-1].reshape(-1,1)
 

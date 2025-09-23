@@ -1,10 +1,14 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from services.fmp_service import get_prediction, get_company_comparison
 
 import os, torch, joblib, numpy as np
+import shutil
+
+import pandas as pd
 from models.model_lstm import StockLSTM
 from utils.utils import fetch_historical_prices, load_json_prices
+
 
 app = FastAPI()
 app.add_middleware(
@@ -45,8 +49,8 @@ def predict_single_symbol(symbol: str) -> dict:
     # gabungkan data API + JSON lokal (opsional)
     df_api = fetch_historical_prices(symbol)
     df_json = load_json_prices(symbol)
-    df = (df_api if df_json.empty else
-          df_api.append(df_json, ignore_index=True).drop_duplicates("date").sort_values("date"))
+    df = pd.concat([df_api, df_json], ignore_index=True).drop_duplicates("date").sort_values("date") \
+        if not df_json.empty else df_api
 
     prices = df["close"].values[-30:].reshape(-1, 1)
     seq_scaled = scaler.transform(prices)
@@ -55,7 +59,7 @@ def predict_single_symbol(symbol: str) -> dict:
     with torch.no_grad():
         pred_scaled = model(x).item()
     pred_real = scaler.inverse_transform([[pred_scaled]])[0][0]
-    return {"symbol": symbol, "prediksi_besok_lstm": round(float(pred_real), 2)}
+    return {"symbol": symbol, "tommorow_prediction": round(float(pred_real), 2)}
 
 # ----------------------------------------------------------------------
 # GET /predict-lstm/AAPL
@@ -66,14 +70,21 @@ def predict_lstm(symbol: str):
     """
     return predict_single_symbol(symbol)
 
-# GET /predict-lstm-multi?symbols=AAPL,MSFT,TSLA
+# GET /predict-lstm-multi?symbols=AAPL,MSFT,GOOGL
 @app.get("/predict-lstm-multi")
 def predict_lstm_multi(symbols: str = Query(...)):
     """
     Prediksi banyak symbol sekaligus.
-    Contoh: /predict-lstm-multi?symbols=AAPL,MSFT,TSLA
+    Contoh: /predict-lstm-multi?symbols=AAPL,MSFT,GOOGL
     """
     out = []
     for sym in [s.strip().upper() for s in symbols.split(",")]:
         out.append(predict_single_symbol(sym))
     return {"results": out}
+
+@app.post("/upload/")
+async def upload_file(file: UploadFile = File(...)):
+    file_path = os.path.join("data", file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"filename": file.filename, "message": "File uploaded successfully"}
