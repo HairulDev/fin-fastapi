@@ -1,13 +1,19 @@
 from fastapi import FastAPI, Query, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from services.fmp_service import get_prediction, get_company_comparison
+from fastapi.responses import StreamingResponse
 
+import asyncio
 import os, torch, joblib, numpy as np
 import shutil
-
 import pandas as pd
+
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import MinMaxScaler
+
 from models.model_lstm import StockLSTM
-from utils.utils import fetch_historical_prices, load_json_prices
+from utils.utils import fetch_historical_prices, load_json_prices, fetch_price
+from services.fmp_service import get_prediction, get_company_comparison
+
 
 
 app = FastAPI()
@@ -61,6 +67,53 @@ def predict_single_symbol(symbol: str) -> dict:
     pred_real = scaler.inverse_transform([[pred_scaled]])[0][0]
     return {"symbol": symbol, "tommorow_prediction": round(float(pred_real), 2)}
 
+
+async def train_api():
+    """
+    Generator async yang men-stream log training LSTM untuk beberapa symbol.
+    """
+    symbols = ["AAPL", "MSFT", "GOOGL"]
+    seq_len = 30
+
+    for symbol in symbols:
+        yield f"\n=== Training {symbol} ===\n"
+        await asyncio.sleep(0)  # beri kesempatan event loop
+
+        # ambil data gabungan API + JSON lokal
+        df = fetch_price(symbol)
+        prices = df["close"].values[::-1].reshape(-1, 1)
+
+        scaler = MinMaxScaler()
+        prices_scaled = scaler.fit_transform(prices)
+
+        X, y = [], []
+        for i in range(len(prices_scaled) - seq_len):
+            X.append(prices_scaled[i:i + seq_len])
+            y.append(prices_scaled[i + seq_len])
+
+        X = torch.tensor(np.array(X)).float()
+        y = torch.tensor(np.array(y)).float()
+        loader = DataLoader(TensorDataset(X, y), batch_size=32, shuffle=True)
+
+        model = StockLSTM()
+        loss_fn = torch.nn.MSELoss()
+        opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+        for epoch in range(20):
+            for xb, yb in loader:
+                opt.zero_grad()
+                loss = loss_fn(model(xb), yb)
+                loss.backward()
+                opt.step()
+            msg = f"{symbol} epoch {epoch + 1} loss {loss.item():.4f}\n"
+            yield msg
+            await asyncio.sleep(0)
+
+        torch.save(model.state_dict(), f"stock_lstm_{symbol}.pt")
+        joblib.dump(scaler, f"price_scaler_{symbol}.gz")
+        yield f"Model & scaler for {symbol} saved.\n"
+        await asyncio.sleep(0)
+
 # ----------------------------------------------------------------------
 # GET /predict-lstm/AAPL
 @app.get("/predict-lstm/{symbol}")
@@ -82,9 +135,28 @@ def predict_lstm_multi(symbols: str = Query(...)):
         out.append(predict_single_symbol(sym))
     return {"results": out}
 
+@app.post("/train-lstm")
+async def train_lstm():
+    """
+    Trigger training semua symbol dan kirim log secara streaming (SSE).
+    Test dengan: curl -N -X POST http://localhost:8000/train-lstm
+    atau Postman (tab 'Raw', keep-alive).
+    """
+    return StreamingResponse(train_api(), media_type="text/plain")
+
+
+
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
+    os.makedirs("data", exist_ok=True)
+
     file_path = os.path.join("data", file.filename)
+    is_overwrite = os.path.exists(file_path)
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    return {"filename": file.filename, "message": "File uploaded successfully"}
+
+    return {
+        "filename": file.filename,
+        "message": "File overwritten successfully" if is_overwrite else "File uploaded successfully"
+    }

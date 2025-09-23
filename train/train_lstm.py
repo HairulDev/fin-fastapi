@@ -5,7 +5,7 @@ import torch, numpy as np, joblib
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MinMaxScaler
 from models.model_lstm import StockLSTM
-from utils.utils import fetch_price  # <-- sudah ada di utils
+from utils.utils import fetch_price
 
 symbols = ["AAPL", "MSFT", "GOOGL"]
 
