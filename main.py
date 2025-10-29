@@ -13,7 +13,8 @@ from sklearn.preprocessing import MinMaxScaler
 from models.model_lstm import StockLSTM
 from utils.utils import fetch_historical_prices, load_json_prices, fetch_price
 from services.fmp_service import get_prediction, get_company_comparison
-
+from services.wage_prediction_service import train_and_predict_minimum_wage
+from services.wage_prediction_service import get_paginated_predictions
 
 
 app = FastAPI()
@@ -67,7 +68,6 @@ def predict_single_symbol(symbol: str) -> dict:
     pred_real = scaler.inverse_transform([[pred_scaled]])[0][0]
     return {"symbol": symbol, "tommorow_prediction": round(float(pred_real), 2)}
 
-
 async def train_api():
     """
     Generator async yang men-stream log training LSTM untuk beberapa symbol.
@@ -113,8 +113,16 @@ async def train_api():
         joblib.dump(scaler, f"price_scaler_{symbol}.gz")
         yield f"Model & scaler for {symbol} saved.\n"
         await asyncio.sleep(0)
-
 # ----------------------------------------------------------------------
+
+@app.get("/predict-wage")
+def predict_minimum_wage(
+    province: str | None = Query(None, description="Province name (optional)"),
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    limit: int = Query(10, ge=1, le=999, description="Number of items per page")
+):
+    return get_paginated_predictions(province, page, limit)
+
 # GET /predict-lstm/AAPL
 @app.get("/predict-lstm/{symbol}")
 def predict_lstm(symbol: str):
@@ -143,8 +151,6 @@ async def train_lstm():
     atau Postman (tab 'Raw', keep-alive).
     """
     return StreamingResponse(train_api(), media_type="text/plain")
-
-
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
